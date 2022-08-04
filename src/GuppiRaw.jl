@@ -118,20 +118,35 @@ function __init__()
 end
 
 """
-Returns the number of channels per antenna (i.e. `obsnchan ÷ nants`).
+Returns the number of channels per aspect (i.e. `obsnchan ÷ naspects`).
 Missing `nants` implies `nants == 1`.
 """
 function antnchan(grh::GuppiRaw.Header)::Int
   @assert haskey(grh, :obsnchan) "header has no obsnchan field"
+  obsnbeams = get(grh, :nbeams, 0)
   obsnants = get(grh, :nants, 1)
-  @assert typeof(obsnants) <: Int
+  obsnaspects = obsnbeams > 0 ? obsnbeams : obsnants
+  @assert typeof(obsnaspects) <: Int
 
   obsnchan = grh[:obsnchan]
   @assert typeof(obsnchan) <: Int
-  @assert obsnchan % obsnants == 0 "nants must divide obsnchan"
+  @assert obsnchan % obsnaspects == 0 @sprintf("%s must divide obsnchan", obsnbeams > 0 ? "nbeams" : "nants")
 
   # Return number of channels per antenna
-  obsnchan ÷ obsnants
+  obsnchan ÷ obsnaspects
+end
+
+"""
+Returns the number of aspects, that is `nants` or `beams`, with the latter taking precedence if non-zero.
+"""
+function naspects(grh::GuppiRaw.Header)::Int
+  obsnbeams = get(grh, :nbeams, 0)
+  obsnants = get(grh, :nants, 1)
+  obsnaspects = obsnbeams > 0 ? obsnbeams : obsnants
+  @assert typeof(obsnaspects) <: Int
+
+  # Return number of aspects
+  obsnaspects
 end
 
 """
@@ -296,7 +311,7 @@ corresponding to `(npol, ntime, obsnchan÷nants, nants)`.
 function Base.size(grh::Header)
   @assert haskey(grh, :obsnchan) "header has no obsnchan field"
 
-  obsnants = get(grh, :nants, 1)
+  obsnants = naspects(grh)
   obsnchan = grh[:obsnchan]
   obsntime = Blio.ntime(grh)
   npol = get(grh, :npol, 1) < 2 ? 1 : 2
@@ -372,7 +387,7 @@ nchan*nants/obschan] (i.e. it will have an extra antenna dimension).
 function Base.Array(grh::Header, nchan::Int=0)::RawArray
   @assert haskey(grh, :obsnchan) "header has no obsnchan field"
 
-  obsnants = get(grh, :nants, 1)
+  obsnaspects = naspects(grh)
   obsnchan = grh[:obsnchan]
   # antnchan is number of channels per antenna
   antnchan = GuppiRaw.antnchan(grh)
@@ -384,17 +399,17 @@ function Base.Array(grh::Header, nchan::Int=0)::RawArray
     # If nants > 1 (i.e. length of dims is 4)
     if length(dims) == 4
       antnchan = dims[3]
-      obsnants = dims[4]
-      if nchan > obsnants * antnchan
-        nchan = obsnants * antnchan
+      obsnaspects = dims[4]
+      if nchan > obsnaspects * antnchan
+        nchan = obsnaspects * antnchan
         @warn "nchan limited to $nchan"
       end
       if nchan % antnchan != 0
         @warn "nchan $nchan not divisible by antnchan $antnchan"
         dims = (dims[1:2]..., nchan)
       else
-        obsnants = nchan ÷ antnchan
-        dims = (dims[1:3]..., obsnants)
+        obsnaspects = nchan ÷ antnchan
+        dims = (dims[1:3]..., obsnaspects)
       end
     else
       # nants==1 case
