@@ -146,7 +146,7 @@ end
 """
     antnchan(grh)::Int
 
-Returns the number of channels per antenna (i.e. `obsnchan ÷ nants`).
+Returns the number of channels per aspect (i.e. `obsnchan ÷ naspects`).
 Missing `nants` implies `nants == 1`.
 
 `grh` can be any Dict-like object that supports `haskey` and `get`, such as
@@ -154,15 +154,30 @@ Missing `nants` implies `nants == 1`.
 """
 function antnchan(grh)::Int
   @assert haskey(grh, :obsnchan) "header has no obsnchan field"
+  obsnbeams = get(grh, :nbeams, 0)
   obsnants = get(grh, :nants, 1)
-  @assert typeof(obsnants) <: Int
+  obsnaspects = obsnbeams > 0 ? obsnbeams : obsnants
+  @assert typeof(obsnaspects) <: Int
 
   obsnchan = grh[:obsnchan]
   @assert typeof(obsnchan) <: Int
-  @assert obsnchan % obsnants == 0 "nants must divide obsnchan"
+  @assert obsnchan % obsnaspects == 0 @sprintf("%s must divide obsnchan", obsnbeams > 0 ? "nbeams" : "nants")
 
   # Return number of channels per antenna
-  obsnchan ÷ obsnants
+  obsnchan ÷ obsnaspects
+end
+
+"""
+Returns the number of aspects, that is `nants` or `beams`, with the latter taking precedence if non-zero.
+"""
+function naspects(grh::GuppiRaw.Header)::Int
+  obsnbeams = get(grh, :nbeams, 0)
+  obsnants = get(grh, :nants, 1)
+  obsnaspects = obsnbeams > 0 ? obsnbeams : obsnants
+  @assert typeof(obsnaspects) <: Int
+
+  # Return number of aspects
+  obsnaspects
 end
 
 """
@@ -350,6 +365,39 @@ function write(io::IO, grh::Header; skip_padding::Bool=true)
 end
 
 """
+   size(grh::GuppiRaw.Header[, dim])
+
+Return a tuple containing the dimensions of the data block described by `grh`.
+Optionally you can specify a dimension to just get the length of that
+dimension.
+
+If `NANTS` is 1 or unspecified, the returned tuple have three elements
+corresponding to `(npol, ntime, obsnchan)`.
+
+If `NANTS` is greater than 1, the returned tuple will have four elements
+corresponding to `(npol, ntime, obsnchan÷nants, nants)`.
+"""
+function Base.size(grh::Header)
+  @assert haskey(grh, :obsnchan) "header has no obsnchan field"
+
+  obsnants = naspects(grh)
+  obsnchan = grh[:obsnchan]
+  obsntime = Blio.ntime(grh)
+  npol = get(grh, :npol, 1) < 2 ? 1 : 2
+
+  if obsnants > 1
+    @assert obsnchan % obsnants == 0 "obsnchn $obsnchan not divisible by nants $obsnants"
+    dims = (npol, obsntime, obsnchan÷obsnants, obsnants)
+  else
+    dims = (npol, obsntime, obsnchan)
+  end
+
+  dims
+end
+
+Base.size(grh::Header, dim) = size(grh)[dim]
+
+"""
 Type alias for possible GuppiRaw data Arrays
 """
 const RawArray = Union{
@@ -408,7 +456,7 @@ nchan*nants/obschan] (i.e. it will have an extra antenna dimension).
 function Array(grh::Header, nchan::Int=0)::RawArray
   @assert haskey(grh, :obsnchan) "header has no obsnchan field"
 
-  obsnants = get(grh, :nants, 1)
+  obsnaspects = naspects(grh)
   obsnchan = grh[:obsnchan]
   # antnchan is number of channels per antenna
   antnchan = GuppiRaw.antnchan(grh)
@@ -420,17 +468,17 @@ function Array(grh::Header, nchan::Int=0)::RawArray
     # If nants > 1 (i.e. length of dims is 4)
     if length(dims) == 4
       antnchan = dims[3]
-      obsnants = dims[4]
-      if nchan > obsnants * antnchan
-        nchan = obsnants * antnchan
+      obsnaspects = dims[4]
+      if nchan > obsnaspects * antnchan
+        nchan = obsnaspects * antnchan
         @warn "nchan limited to $nchan"
       end
       if nchan % antnchan != 0
         @warn "nchan $nchan not divisible by antnchan $antnchan"
         dims = (dims[1:2]..., nchan)
       else
-        obsnants = nchan ÷ antnchan
-        dims = (dims[1:3]..., obsnants)
+        obsnaspects = nchan ÷ antnchan
+        dims = (dims[1:3]..., obsnaspects)
       end
     else
       # nants==1 case
