@@ -352,7 +352,13 @@ end
 """
 Type alias for possible GuppiRaw data Arrays
 """
-const RawArray = Union{Array{Complex{Int8}},Array{Complex{Int16}}}
+const RawArray = Union{
+  Array{Complex{Int8}},
+  Array{Complex{Int16}},
+  Array{Complex{Float16}},
+  Array{Complex{Float32}},
+  Array{Complex{Float64}},
+}
 
 """
 A HeaderDataUnit is a struct consisting of a Header and a RawArray
@@ -438,10 +444,15 @@ function Array(grh::Header, nchan::Int=0)::RawArray
   end
 
   nbits = get(grh, :nbits, 8)
-  @assert nbits == 8 || nbits == 16 "unsupported nbits ($nbits)"
-  eltype = nbits == 8 ? Int8 : Int16
-
-  Array{Complex{eltype}}(undef, dims)
+  if get(grh, :datatype, "INTEGER") == "FLOAT"
+    @assert nbits == 16 || nbits == 32 || nbits == 64 "unsupported floating nbits ($nbits)"
+    eltype = nbits == 16 ? Float16 : nbits == 32 ? Float32 : Float64
+    return Array{Complex{eltype}}(undef, dims)
+  else
+    @assert nbits == 8 || nbits == 16 "unsupported nbits ($nbits)"
+    eltype = nbits == 8 ? Int8 : Int16
+    return Array{Complex{eltype}}(undef, dims)
+  end
 end
 
 """
@@ -655,7 +666,7 @@ function getntime(grh)::Int
 
   npol = get(grh, :npol, 1) < 2 ? 1 : 2
   nbits = get(grh, :nbits, 8)
-  @assert nbits == 8 || nbits == 16 "unsupported nbits ($nbits)"
+  @assert nbits == 8 || nbits == 16 || nbits == 32 || nbits == 64 "unsupported nbits ($nbits)"
 
   nt, rem = divrem(8 * grh[:blocsize], 2 * grh[:obsnchan] * npol * nbits)
   @assert rem == 0
@@ -674,7 +685,7 @@ is appropriately typed and sized according to `hdu.hdr`.
 """
 function resize_hdu(hdu::HeaderDataUnit)::HeaderDataUnit
   nbits = get(hdu.hdr, :nbits, 8)
-  @assert nbits == 8 || nbits == 16 "unsupported nbits ($nbits)"
+  @assert nbits == 8 || nbits == 16 || nbits == 32 || nbits == 64 "unsupported nbits ($nbits)"
   reimtype = nbits == 8 ? Int8 : Int16
 
   if isempty(hdu.hdr)
