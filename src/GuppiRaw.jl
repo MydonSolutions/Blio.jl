@@ -311,16 +311,16 @@ corresponding to `(npol, ntime, obsnchan÷nants, nants)`.
 function Base.size(grh::Header)
   @assert haskey(grh, :obsnchan) "header has no obsnchan field"
 
-  obsnants = naspects(grh)
+  obsnaspects = naspects(grh)
   obsnchan = grh[:obsnchan]
   obsntime = Blio.ntime(grh)
   npol = get(grh, :npol, 1) < 2 ? 1 : 2
 
-  if obsnants > 1
-    @assert obsnchan % obsnants == 0 "obsnchn $obsnchan not divisible by nants $obsnants"
-    dims = (npol, obsntime, obsnchan÷obsnants, obsnants)
+  if obsnaspects > 1
+    @assert obsnchan % obsnaspects == 0 "obsnchan $obsnchan not divisible by number of aspects (nbeams or nants) $obsnaspects"
+    dims = (npol, obsntime, obsnchan÷obsnaspects, obsnaspects)
   else
-    dims = (npol, obsntime, obsnchan)
+    dims = (npol, obsntime, obsnchan, 1)
   end
 
   dims
@@ -334,6 +334,8 @@ Type alias for possible GuppiRaw data Arrays
 const RawArray = Union{
   Array{Complex{Int8}},
   Array{Complex{Int16}},
+  Array{Complex{Int32}},
+  Array{Complex{Int64}},
   Array{Complex{Float16}},
   Array{Complex{Float32}},
   Array{Complex{Float64}},
@@ -418,7 +420,7 @@ function Base.Array(grh::Header, nchan::Int=0)::RawArray
         nchan = obsnchan
         @warn "nchan limited to $nchan"
       end
-      dims = (dims[1:2]..., nchan)
+      dims = (dims[1:2]..., nchan, 1)
     end
   end
 
@@ -428,8 +430,8 @@ function Base.Array(grh::Header, nchan::Int=0)::RawArray
     eltype = nbits == 16 ? Float16 : nbits == 32 ? Float32 : Float64
     return Array{Complex{eltype}}(undef, dims)
   else
-    @assert nbits == 8 || nbits == 16 "unsupported nbits ($nbits)"
-    eltype = nbits == 8 ? Int8 : Int16
+    @assert nbits == 8 || nbits == 16 || nbits == 32 "unsupported nbits ($nbits)"
+    eltype = nbits == 8 ? Int8 : nbits == 16 ? Int16 : nbits == 32 ? Int32 : Int64
     return Array{Complex{eltype}}(undef, dims)
   end
 end
